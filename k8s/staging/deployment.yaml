@@ -4,13 +4,21 @@ kind: Namespace
 metadata:
   name: trusted-staging
 ---
+# Deployment for trusted-ai-app in staging environment
+# This file should be placed in: k8s/staging/deployment.yaml
+# in your GitHub repository: https://github.com/nedoshi/trusted-ai-app
+
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: trusted-ai-app
   namespace: trusted-staging
+  annotations:
+    signature.verified: "true"
+    argocd.argoproj.io/sync-wave: "1"
   labels:
     app: trusted-ai-app
+    app.kubernetes.io/instance: trusted-ai-staging
 spec:
   replicas: 1
   selector:
@@ -20,27 +28,77 @@ spec:
     metadata:
       labels:
         app: trusted-ai-app
+        version: v1
     spec:
+      serviceAccountName: default
       containers:
       - name: app
         image: registry.access.redhat.com/ubi8/ubi-minimal:latest
-        command: ['sleep', 'infinity']
+        imagePullPolicy: IfNotPresent
+        command:
+        - /bin/sh
+        - -c
+        - python3 -m http.server 8080
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        env:
+        - name: ENVIRONMENT
+          value: "staging"
         resources:
-          requests:
-            cpu: 50m
-            memory: 64Mi
           limits:
-            cpu: 100m
-            memory: 128Mi
+            cpu: "100m"
+            memory: "128Mi"
+          requests:
+            cpu: "50m"
+            memory: "64Mi"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
 ---
+# Service for trusted-ai-app
 apiVersion: v1
 kind: Service
 metadata:
   name: trusted-ai-app
   namespace: trusted-staging
+  labels:
+    app: trusted-ai-app
 spec:
   selector:
     app: trusted-ai-app
   ports:
-  - port: 80
+  - protocol: TCP
+    port: 80
     targetPort: 8080
+---
+# Route for trusted-ai-app (OpenShift specific)
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: trusted-ai-app
+  namespace: trusted-staging
+  labels:
+    app: trusted-ai-app
+spec:
+  to:
+    kind: Service
+    name: trusted-ai-app
+  tls:
+    termination: edge
